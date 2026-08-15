@@ -27,16 +27,16 @@ import subprocess
 import modal
 
 
-SUNET_ID = "TODO"  # NOTE: modal_utils.py should remain unchanged other than adding your SUNET_ID.
+SUNET_ID = "PesseJinkman"  # NOTE: modal_utils.py should remain unchanged other than adding your SUNET_ID.
 if SUNET_ID == "TODO":
     raise ValueError("Please set SUNET_ID in cs336_alignment/modal_utils.py before running Modal jobs.")
 
 
-GPU = "B200:2"
+GPU = "A100-80GB:2"
 MAX_CONTAINERS = 4
 REMOTE_ROOT = "/root"
 RUN_TIMEOUT_SECONDS = 60 * 60
-WANDB_SECRET_NAME = "wandb"
+WANDB_SECRET_NAME = "wandb-secret"
 
 app = modal.App(f"cs336-a5-rlvr-{SUNET_ID}")
 wandb_secret = modal.Secret.from_name(WANDB_SECRET_NAME)
@@ -58,6 +58,7 @@ image = (
 image = image.add_local_file("AGENTS.md", f"{REMOTE_ROOT}/AGENTS.md")
 image = image.add_local_file("CLAUDE.md", f"{REMOTE_ROOT}/CLAUDE.md")
 
+volume = modal.Volume.from_name("hf-cache-vol", create_if_missing=True)
 
 def quote_command(command: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in command)
@@ -69,6 +70,7 @@ def quote_command(command: list[str]) -> str:
     timeout=RUN_TIMEOUT_SECONDS,
     max_containers=MAX_CONTAINERS,
     secrets=[wandb_secret],
+    volumes={"/root/.cache/huggingface": volume}
 )
 def run_command(command: list[str]) -> str:
     command_str = quote_command(command)
