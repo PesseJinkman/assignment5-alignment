@@ -1,15 +1,16 @@
 import torch
-from transformers import PreTrainedTokenizer
+import torch.nn.functional as F
+from transformers import PreTrainedTokenizer, PreTrainedModel
 from cs336_alignment.checkpoint import get_model_and_tokenizer
 
 
 MODEL_ID = "allenai/OLMo-2-0425-1B"
 
 def tokenize_prompt_and_output(
-        prompt_strs: list[str], 
-        output_strs: list[str], 
-        tokenizer: PreTrainedTokenizer
-    ) -> dict[str, torch.Tensor]:
+    prompt_strs: list[str], 
+    output_strs: list[str], 
+    tokenizer: PreTrainedTokenizer
+) -> dict[str, torch.Tensor]:
 
     if len(prompt_strs) != len(output_strs):
         raise ValueError("Prompt and output batch sizes differ.")
@@ -43,4 +44,27 @@ def tokenize_prompt_and_output(
         "input_ids": torch.tensor(input_ids, dtype=torch.long),
         "labels": torch.tensor(labels, dtype=torch.long),
         "response_mask": torch.tensor(response_masks, dtype=torch.bool),
+    }
+
+def get_response_log_probs(
+    model: PreTrainedModel,
+    input_ids: torch.Tensor,
+    labels: torch.Tensor,
+    return_token_entropy: bool = False,
+) -> dict[str, torch.Tensor]:
+
+    logits = model(input_ids=input_ids).logits
+    all_log_probs = F.log_softmax(logits, dim=-1)
+    token_log_probs = torch.gather(all_log_probs, dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
+
+    if not return_token_entropy:
+        return {
+            "log_probs": token_log_probs
+        }
+
+    token_entropy = -torch.sum(all_log_probs.exp() * all_log_probs, dim=-1)
+
+    return {
+        "log_probs": token_log_probs,
+        "token_entropy": token_entropy
     }
