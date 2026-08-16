@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import torch
 import torch.nn.functional as F
 from transformers import PreTrainedTokenizer, PreTrainedModel
@@ -68,3 +69,32 @@ def get_response_log_probs(
         "log_probs": token_log_probs,
         "token_entropy": token_entropy
     }
+
+def compute_rollout_rewards(
+    reward_fn: Callable[[str, str], dict[str, float]],
+    rollout_responses: list[str],
+    repeated_ground_truths: list[str],
+) -> tuple[torch.Tensor, dict[str, float]]:
+
+
+    format_rewards = 0.0
+    answer_rewards = 0.0
+    rewards = 0.0
+    rewards_list = []
+    for response, ground_truth in zip(rollout_responses, repeated_ground_truths):
+        all_rewards = reward_fn(response, ground_truth)
+        format_rewards += all_rewards['format_reward']
+        answer_rewards += all_rewards['answer_reward']
+        rewards += all_rewards['reward']
+        rewards_list.append(all_rewards['reward'])
+
+    n = len(rollout_responses)
+
+    metadata = {
+        'mean_format_rewards': format_rewards/n,
+        'mean_answer_rewards': answer_rewards/n,
+        'mean_total_rewards': rewards/n
+    }
+
+    return torch.Tensor(rewards_list,), metadata
+
