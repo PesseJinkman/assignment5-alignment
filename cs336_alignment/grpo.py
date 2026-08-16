@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import Literal
 import torch
 import torch.nn.functional as F
 from transformers import PreTrainedTokenizer, PreTrainedModel
@@ -96,5 +97,30 @@ def compute_rollout_rewards(
         'mean_total_rewards': rewards/n
     }
 
-    return torch.Tensor(rewards_list,), metadata
+    return torch.Tensor(rewards_list), metadata
 
+def compute_group_normalized_rewards(
+    raw_rewards: torch.Tensor,
+    group_size: int,
+    baseline: Literal["mean", "none"] = "mean",
+    advantage_eps: float = 1e-6,
+    advantage_normalizer: Literal["std", "none", "mean"] = "std",
+):
+
+    grouped_rewards = raw_rewards.reshape(-1, group_size)
+
+    if baseline=="mean" and advantage_normalizer=="std":
+        grouped_mean = torch.mean(grouped_rewards, dim=-1, keepdim=True)
+        grouped_std = torch.std(grouped_rewards, dim=-1, keepdim=True) + advantage_eps
+        advantages = (grouped_rewards-grouped_mean)/grouped_std
+        advantages = advantages.reshape(-1)
+        metadata = {
+            'max_reward': torch.max(raw_rewards).item(),
+            'min_reward': torch.min(raw_rewards).item(),
+            'max_mean_reward': torch.max(grouped_mean).item(),
+            'min_mean_reward': torch.min(grouped_mean).item(), 
+        }  
+
+        return advantages, metadata
+
+    raise NotImplementedError
