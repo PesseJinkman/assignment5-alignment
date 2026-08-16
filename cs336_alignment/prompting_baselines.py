@@ -1,10 +1,10 @@
 from cs336_alignment.vllm_utils import VLLMServer
-from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
+from cs336_alignment.drgrpo_grader import r1_zero_reward_fn, question_only_reward_fn
 import json
 
 
 DATA_PATH = "data/gsm8k/test.jsonl"
-PROMPT_PATH = "cs336_alignment/prompts/r1_zero.prompt"
+PROMPT_PATH = "cs336_alignment/prompts/r1_zero_three_shot_gsm8k.prompt"
 MODEL_ID = "allenai/OLMo-2-0425-1B"
 
 sampling_params = {}
@@ -26,10 +26,11 @@ with open(DATA_PATH, "r", encoding="utf-8") as f:
 get_base_prompt = open(PROMPT_PATH, "r").read()
 
 model_inputs = []
-acutal_outputs = []
+actual_outputs = []
 for d in data:
     model_inputs.append(get_base_prompt.format(question=d["question"]))
-    acutal_outputs.append(d["answer"])
+    actual_outputs.append(d["answer"].split('####')[1].strip())
+
 
 vllm_server = VLLMServer(model_id=MODEL_ID)
 vllm_server.start()
@@ -45,7 +46,7 @@ answer_rewards = 0.0
 rewards = 0.0
 
 for i in range(len(data)):
-    all_rewards = r1_zero_reward_fn(model_outputs[i].text, acutal_outputs[i])
+    all_rewards = r1_zero_reward_fn(model_outputs[i].text, actual_outputs[i])
     format_rewards += all_rewards['format_reward']
     answer_rewards += all_rewards['answer_reward']
     rewards += all_rewards['reward']
