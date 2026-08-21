@@ -32,7 +32,7 @@ if SUNET_ID == "TODO":
     raise ValueError("Please set SUNET_ID in cs336_alignment/modal_utils.py before running Modal jobs.")
 
 
-GPU = "A100-80GB:2"
+GPU = "B200:2"
 MAX_CONTAINERS = 4
 REMOTE_ROOT = "/root"
 RUN_TIMEOUT_SECONDS = 60 * 60

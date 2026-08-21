@@ -6,7 +6,7 @@ def main(*argv: str) -> None:
     command = [
         "python",
         "-u",
-        "cs336_alignment/prompting_baselines.py",
+        "cs336_alignment/grpo.py",
         *argv,
     ]
 
