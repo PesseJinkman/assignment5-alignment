@@ -2,6 +2,7 @@ from collections.abc import Callable
 from typing import Literal
 import torch
 import torch.nn.functional as F
+from torch.optim import Optimizer
 from transformers import PreTrainedTokenizer, PreTrainedModel
 from cs336_alignment.checkpoint import get_model_and_tokenizer
 
@@ -158,3 +159,69 @@ def aggregate_loss_across_microbatch(
         return batch_loss
 
     raise NotImplementedError
+
+def grpo_train_step(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizer,
+    optimizer: Optimizer,
+    gradient_accumulation_steps: int,
+    max_grad_norm: float | None,
+    reward_fn: Callable[[str, str], dict[str, float]],
+    repeated_prompts: list[str],
+    rollout_responses: list[str],
+    repeated_ground_truths: list[str],
+    group_size: int,
+    # Reward normalization
+    baseline: Literal["mean", "none"] = "mean",
+    advantage_eps: float = 1e-6,
+    advantage_normalizer: Literal["std", "none", "mean"] = "std",
+    # Importance reweighting and clipping
+    importance_reweighting_method: Literal["none", "noclip", "grpo", "gspo"] = "none",
+    old_log_probs: torch.Tensor | None = None,
+    cliprange: float | None = None,
+    # Loss normalization
+    loss_normalization: Literal["sequence", "constant"] = "sequence",
+    normalization_constant: int | None = None,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor | float]]:
+
+    tokenized_prompt_and_output = tokenize_prompt_and_output(repeated_prompts, rollout_responses, tokenizer)    
+    raw_rewards, rewards_metadata = compute_rollout_rewards(reward_fn, rollout_responses, repeated_ground_truths)
+    advantages, advantage_metadata = compute_group_normalized_rewards(raw_rewards, group_size, baseline, advantage_eps, advantage_normalizer)
+
+    microbatch_size = len(repeated_prompts) // gradient_accumulation_steps
+
+    optimizer.zero_grad()
+
+    loss = 0.0
+    for i in range(0, len(repeated_prompts), microbatch_size):
+        microbatch_inputs = tokenized_prompt_and_output["input_ids"][i:i+microbatch_size]
+        microbatch_labels = tokenized_prompt_and_output["labels"][i:i+microbatch_size]
+        microbatch_mask = tokenized_prompt_and_output["response_mask"][i:i+microbatch_size]
+        microbatch_advantages = advantages[i : i + microbatch_size].unsqueeze(-1)
+        microbatch_old_log_probs = (old_log_probs[i : i + microbatch_size] if old_log_probs is not None else None)
+        policy_log_probs = get_response_log_probs(model, microbatch_inputs, microbatch_labels)
+        per_token_policy_gradient_loss, loss_metadata = compute_policy_gradient_loss(microbatch_advantages, policy_log_probs["log_probs"], importance_reweighting_method, microbatch_old_log_probs, cliprange, microbatch_mask)
+        microbatch_loss = aggregate_loss_across_microbatch(per_token_policy_gradient_loss, microbatch_mask, loss_normalization, normalization_constant)
+
+        if loss_normalization == 'sequence':
+            microbatch_loss = microbatch_loss * (microbatch_inputs.shape[0]/len(repeated_prompts))
+
+        microbatch_loss.backward()
+        loss += microbatch_loss
+
+    total_norm = 0.0
+    if max_grad_norm is not None:
+        total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+    
+    optimizer.step()
+    optimizer.zero_grad()
+
+    metadata = {
+        "rewards_metadata": rewards_metadata,
+        "advantage_metadata": advantage_metadata,
+        "loss_metadata": loss_metadata,
+        "total_norm": total_norm
+    }
+    
+    return loss, metadata
+
